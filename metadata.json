@@ -1,0 +1,6 @@
+{
+  "name": "TAN TECH SUPPORT",
+  "description": "Your Trusted Digital Partner — Multi-service digital platform offering digital services, online marketplace, delivery service, and vehicle booking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

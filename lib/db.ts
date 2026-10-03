@@ -1,0 +1,788 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import {
+  User,
+  UserRecord,
+  Vendor,
+  Driver,
+  Product,
+  Order,
+  ServicePackage,
+  ServiceRequest,
+  DeliveryRequest,
+  VehicleBooking,
+  Advertisement,
+  NewsItem,
+  SiteSettings,
+  NotificationItem,
+} from './types';
+
+// Simple password hashing helper using PBKDF2
+export function hashPassword(password: string): string {
+  const salt = 'tantech_secure_salt_2026';
+  return crypto.pbkdf2Sync(password, salt, 1000, 32, 'sha256').toString('hex');
+}
+
+export function verifyPassword(password: string, hash: string): boolean {
+  return hashPassword(password) === hash;
+}
+
+export interface DatabaseSchema {
+  users: UserRecord[];
+  vendors: Vendor[];
+  drivers: Driver[];
+  products: Product[];
+  services: ServicePackage[];
+  serviceRequests: ServiceRequest[];
+  orders: Order[];
+  deliveries: DeliveryRequest[];
+  vehicleBookings: VehicleBooking[];
+  advertisements: Advertisement[];
+  news: NewsItem[];
+  settings: SiteSettings;
+  notifications: NotificationItem[];
+}
+
+const DATA_DIR = path.join(process.cwd(), 'data');
+const DB_FILE = path.join(DATA_DIR, 'tantech_db.json');
+
+const INITIAL_SERVICES: ServicePackage[] = [
+  {
+    id: 'srv-print',
+    title: 'Digital Printing Service',
+    category: 'printing',
+    description: 'High-definition laser & offset printing for visiting cards, flyers, banners, brochures, posters, and customized brand merchandise.',
+    iconName: 'Printer',
+    startingPrice: 150,
+    estimatedDelivery: '24 - 48 Hours',
+    options: ['Visiting Cards', 'Business Cards', 'Posters & Flyers', 'Vinyl Banners', 'Brochures', 'Invitation Cards', 'Custom Packaging'],
+    features: ['350GSM Card Stock', 'Matte / Gloss Lamination', 'Foil Stamping Available', 'Doorstep Delivery', 'Color Calibration Guarantee'],
+    popular: true,
+  },
+  {
+    id: 'srv-design',
+    title: 'Graphic Design Studio',
+    category: 'graphic_design',
+    description: 'Creative brand identity, modern logos, social media marketing kits, YouTube thumbnails, and marketing collaterals.',
+    iconName: 'Palette',
+    startingPrice: 500,
+    estimatedDelivery: '24 - 72 Hours',
+    options: ['Logo Design', 'Facebook Cover & Post', 'YouTube Thumbnail', 'Business Flyer', 'Packaging Design', 'Vector Illustration'],
+    features: ['Unlimited Revisions', 'Source Files (AI, PSD, SVG, PDF)', 'Commercial License Included', '1-on-1 Creative Consultation'],
+    popular: true,
+  },
+  {
+    id: 'srv-video',
+    title: 'Video Editing & Production',
+    category: 'video_editing',
+    description: 'Professional cinematic editing for YouTube videos, TikTok & Reels, promotional ads, wedding highlights, and corporate presentations.',
+    iconName: 'Video',
+    startingPrice: 1000,
+    estimatedDelivery: '48 - 72 Hours',
+    options: ['YouTube Long-form', 'Facebook / Instagram Reels', 'Product Commercial', 'Corporate Explainer', 'Podcast Editing'],
+    features: ['4K Ultra HD Export', 'Color Grading & Sound Mixing', 'Subtitles & Motion Graphics', 'Royalty-Free Audio Library'],
+    popular: false,
+  },
+  {
+    id: 'srv-training',
+    title: 'Computer Training Institute',
+    category: 'computer_training',
+    description: 'Hands-on practical computer training courses for career-ready skills in MS Office, Basic Computing, Graphic Design, and IT literacy.',
+    iconName: 'GraduationCap',
+    startingPrice: 2500,
+    estimatedDelivery: 'Course Duration: 4 - 8 Weeks',
+    options: ['MS Word & Office Suite', 'Advanced MS Excel & Data', 'MS PowerPoint Presentations', 'Graphic Design Fundamentals', 'Basic Computer & Internet'],
+    features: ['Govt. Standard Certification', '1 Student per PC Lab', 'Flexible Evening & Weekend Batches', 'Free Lifetime Practice Lab Access'],
+    popular: true,
+  },
+];
+
+const INITIAL_PRODUCTS: Product[] = [
+  {
+    id: 'prod-1',
+    name: 'Wireless Silent Keyboard & Ergonomic Mouse Combo',
+    slug: 'wireless-silent-keyboard-mouse',
+    description: 'Ultra-thin 2.4GHz wireless combo with whisper-quiet tactile keys and precise 1600 DPI ergonomic optical mouse. Ideal for office work and digital labs.',
+    price: 1850,
+    originalPrice: 2200,
+    category: 'computer_accessories',
+    images: ['https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80'],
+    stock: 24,
+    vendorId: 'ven-1',
+    vendorName: 'Tan Tech Digital Print & Gadgets Hub',
+    rating: 4.8,
+    reviewsCount: 38,
+    isFeatured: true,
+    createdAt: '2026-09-01T10:00:00Z',
+  },
+  {
+    id: 'prod-2',
+    name: 'Double A 80GSM A4 Premium Digital Printing Paper (500 Sheets)',
+    slug: 'double-a-80gsm-a4-printing-paper',
+    description: 'Super-smooth high-opacity white printing paper engineered specifically for laser and inkjet high-volume print runs without paper jams.',
+    price: 520,
+    originalPrice: 580,
+    category: 'printing_supplies',
+    images: ['https://images.unsplash.com/photo-1586075010923-2dd4570fb338?auto=format&fit=crop&w=800&q=80'],
+    stock: 120,
+    vendorId: 'ven-1',
+    vendorName: 'Tan Tech Digital Print & Gadgets Hub',
+    rating: 4.9,
+    reviewsCount: 92,
+    isFeatured: true,
+    createdAt: '2026-09-02T10:00:00Z',
+  },
+  {
+    id: 'prod-3',
+    name: 'Full HD 1080p Web Camera with Built-in Dual Noise-Cancelling Mic',
+    slug: 'fhd-1080p-webcam-dual-mic',
+    description: 'Plug-and-play USB webcam with crisp 1080p 30FPS sensor, privacy shutter, and wide 90-degree field of view. Perfect for Zoom calls and online training.',
+    price: 2400,
+    originalPrice: 2900,
+    category: 'electronics',
+    images: ['https://images.unsplash.com/photo-1629429408209-1f912961dbd8?auto=format&fit=crop&w=800&q=80'],
+    stock: 18,
+    vendorId: 'ven-2',
+    vendorName: 'Prime Computer Solutions',
+    rating: 4.7,
+    reviewsCount: 29,
+    isFeatured: true,
+    createdAt: '2026-09-03T10:00:00Z',
+  },
+  {
+    id: 'prod-4',
+    name: 'SanDisk Ultra Dual Drive Luxe USB Type-C 128GB Flash Drive',
+    slug: 'sandisk-ultra-dual-drive-luxe-128gb',
+    description: 'All-metal 2-in-1 flash drive with reversible USB Type-C and traditional Type-A connectors. Blazing-fast transfer speeds up to 150MB/s.',
+    price: 1650,
+    originalPrice: 1950,
+    category: 'gadgets',
+    images: [
+      '/assets/images/usb_flash_drive_1791020777278.jpg',
+      'https://images.unsplash.com/photo-1618424181497-157f25b6ddd5?auto=format&fit=crop&w=800&q=80',
+      'https://images.unsplash.com/photo-1624823183493-5f65b5be3d00?auto=format&fit=crop&w=800&q=80',
+      'https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?auto=format&fit=crop&w=800&q=80',
+    ],
+    stock: 45,
+    vendorId: 'ven-2',
+    vendorName: 'Prime Computer Solutions',
+    rating: 4.9,
+    reviewsCount: 64,
+    isFeatured: true,
+    createdAt: '2026-09-04T10:00:00Z',
+  },
+  {
+    id: 'prod-5',
+    name: 'VEIKK Professional Graphics Drawing Tablet with Battery-Free Stylus',
+    slug: 'veikk-graphics-drawing-tablet',
+    description: '10x6 inch active area digital drawing pad with 8192 pressure levels. Essential tool for digital artists, photo editors, and graphic designers.',
+    price: 4950,
+    originalPrice: 5800,
+    category: 'computer_accessories',
+    images: [
+      '/assets/images/graphics_drawing_tablet_1791020789413.jpg',
+      'https://images.unsplash.com/photo-1544816155-12df9643f363?auto=format&fit=crop&w=800&q=80',
+    ],
+    stock: 12,
+    vendorId: 'ven-1',
+    vendorName: 'Tan Tech Digital Print & Gadgets Hub',
+    rating: 4.8,
+    reviewsCount: 21,
+    isFeatured: false,
+    createdAt: '2026-09-05T10:00:00Z',
+  },
+  {
+    id: 'prod-6',
+    name: 'Epson EcoTank Original 003 CMYK 4-Color Ink Bottle Combo',
+    slug: 'epson-ecotank-003-ink-combo',
+    description: 'Genuine high-yield ultra-rich printer refill ink set for Epson L3110, L3150, L3210, and L3250 printers. Yields up to 4500 black and 7500 color pages.',
+    price: 2800,
+    originalPrice: 3200,
+    category: 'printing_supplies',
+    images: [
+      '/assets/images/printer_ink_bottles_1791020803398.jpg',
+      'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=800&q=80',
+    ],
+    stock: 35,
+    vendorId: 'ven-1',
+    vendorName: 'Tan Tech Digital Print & Gadgets Hub',
+    rating: 5.0,
+    reviewsCount: 47,
+    isFeatured: false,
+    createdAt: '2026-09-06T10:00:00Z',
+  },
+  {
+    id: 'prod-7',
+    name: '8-in-1 Aluminium USB-C Hub with 4K HDMI, Gigabit LAN, 100W PD',
+    slug: '8-in-1-usb-c-hub-aluminum',
+    description: 'Expand your laptop connectivity with 4K@30Hz HDMI, 1000Mbps RJ45 Gigabit Ethernet, SD/TF card reader, 3x USB 3.0 ports, and 100W Power Delivery.',
+    price: 2650,
+    originalPrice: 3100,
+    category: 'gadgets',
+    images: ['https://images.unsplash.com/photo-1541807084-5c52b6b3adef?auto=format&fit=crop&w=800&q=80'],
+    stock: 22,
+    vendorId: 'ven-2',
+    vendorName: 'Prime Computer Solutions',
+    rating: 4.7,
+    reviewsCount: 19,
+    isFeatured: false,
+    createdAt: '2026-09-07T10:00:00Z',
+  },
+  {
+    id: 'prod-8',
+    name: 'Heavy Duty Metal Spiral Binding Machine & Starter Coil Pack',
+    slug: 'heavy-duty-spiral-binding-machine',
+    description: 'Professional manual puncher and comb binder for offices, colleges, and digital print press shops. Punches up to 12 sheets simultaneously.',
+    price: 6800,
+    originalPrice: 7500,
+    category: 'office_stationery',
+    images: ['https://images.unsplash.com/photo-1589829085413-56de8ae18c73?auto=format&fit=crop&w=800&q=80'],
+    stock: 8,
+    vendorId: 'ven-1',
+    vendorName: 'Tan Tech Digital Print & Gadgets Hub',
+    rating: 4.9,
+    reviewsCount: 14,
+    isFeatured: false,
+    createdAt: '2026-09-08T10:00:00Z',
+  }
+];
+
+const INITIAL_VENDORS: Vendor[] = [
+  {
+    id: 'ven-1',
+    userId: 'usr-vendor',
+    storeName: 'Tan Tech Digital Print & Gadgets Hub',
+    ownerName: 'Tanvir Hossain',
+    email: 'vendor@tantech.com',
+    phone: '+880 1711-234567',
+    address: 'Shop 14, Tech Commercial Center, GEC Circle',
+    category: 'Printing & Digital Hardware',
+    status: 'approved',
+    description: 'Authorized retailer of certified printing media, consumables, digital graphics hardware, and tech accessories.',
+    rating: 4.9,
+    totalSales: 342,
+    revenue: 485000,
+    createdAt: '2026-08-15T08:00:00Z',
+  },
+  {
+    id: 'ven-2',
+    userId: 'usr-vendor-2',
+    storeName: 'Prime Computer Solutions',
+    ownerName: 'Shahidul Alam',
+    email: 'prime@tantech.com',
+    phone: '+880 1819-876543',
+    address: 'Level 3, Computer City Market, Agrabad',
+    category: 'Computer Hardware & Gadgets',
+    status: 'approved',
+    description: 'Official distributor for premium IT peripherals, networking accessories, and multimedia training gear.',
+    rating: 4.8,
+    totalSales: 189,
+    revenue: 295000,
+    createdAt: '2026-08-20T08:00:00Z',
+  },
+  {
+    id: 'ven-3',
+    userId: 'usr-vendor-3',
+    storeName: 'FastCourier Express Partner Hub',
+    ownerName: 'Moniruzzaman Monir',
+    email: 'monir.courier@example.com',
+    phone: '+880 1912-345678',
+    address: 'Plot 45, Bahaddarhat Bus Terminal Road',
+    category: 'Logistics & Packaging Supplies',
+    status: 'pending',
+    description: 'Regional packaging distributor and express delivery partner pending authorization.',
+    rating: 0,
+    totalSales: 0,
+    revenue: 0,
+    createdAt: '2026-09-28T08:00:00Z',
+  }
+];
+
+const INITIAL_DRIVERS: Driver[] = [
+  {
+    id: 'drv-1',
+    userId: 'usr-driver',
+    name: 'Rahim Chowdhury',
+    phone: '+880 1722-998877',
+    email: 'driver@tantech.com',
+    vehicleType: 'car',
+    vehicleModel: 'Toyota Corolla Axio (AC)',
+    licensePlate: 'DHK METRO-GA-45-1234',
+    status: 'available',
+    rating: 4.9,
+    totalTrips: 285,
+    createdAt: '2026-08-10T08:00:00Z',
+  },
+  {
+    id: 'drv-2',
+    userId: 'usr-driver-2',
+    name: 'Karim Ullah',
+    phone: '+880 1833-445566',
+    email: 'karim.driver@tantech.com',
+    vehicleType: 'cng',
+    vehicleModel: 'Bajaj 4-Stroke CNG Auto Rickshaw',
+    licensePlate: 'CTG THA-11-9876',
+    status: 'available',
+    rating: 4.8,
+    totalTrips: 430,
+    createdAt: '2026-08-12T08:00:00Z',
+  },
+  {
+    id: 'drv-3',
+    userId: 'usr-driver-3',
+    name: 'Nurul Huda',
+    phone: '+880 1944-112233',
+    email: 'nurul.driver@tantech.com',
+    vehicleType: 'van',
+    vehicleModel: 'Toyota HiAce Super GL (11-Seater)',
+    licensePlate: 'CTG CHA-52-3344',
+    status: 'on_trip',
+    rating: 4.9,
+    totalTrips: 198,
+    createdAt: '2026-08-14T08:00:00Z',
+  }
+];
+
+const INITIAL_USERS: UserRecord[] = [
+  {
+    id: 'usr-admin',
+    name: 'Tanvir Hossain (Super Admin)',
+    email: 'admin@tantech.com',
+    role: 'super_admin',
+    phone: '+880 1711-000001',
+    address: 'TAN TECH SUPPORT HQ, GEC Circle',
+    passwordHash: hashPassword('admin123'),
+    createdAt: '2026-08-01T00:00:00Z',
+  },
+  {
+    id: 'usr-staff',
+    name: 'Nusrat Jahan (Ops Staff)',
+    email: 'staff@tantech.com',
+    role: 'staff',
+    phone: '+880 1711-000002',
+    address: 'TAN TECH Support Operations Room',
+    passwordHash: hashPassword('staff123'),
+    createdAt: '2026-08-02T00:00:00Z',
+  },
+  {
+    id: 'usr-vendor',
+    name: 'Tanvir Hossain (Vendor)',
+    email: 'vendor@tantech.com',
+    role: 'vendor',
+    phone: '+880 1711-234567',
+    address: 'Shop 14, Tech Commercial Center',
+    vendorId: 'ven-1',
+    passwordHash: hashPassword('vendor123'),
+    createdAt: '2026-08-15T08:00:00Z',
+  },
+  {
+    id: 'usr-driver',
+    name: 'Rahim Chowdhury (Driver)',
+    email: 'driver@tantech.com',
+    role: 'driver',
+    phone: '+880 1722-998877',
+    address: 'Chittagong Central Transport Hub',
+    driverId: 'drv-1',
+    passwordHash: hashPassword('driver123'),
+    createdAt: '2026-08-10T08:00:00Z',
+  },
+  {
+    id: 'usr-customer',
+    name: 'Anisur Rahman',
+    email: 'customer@tantech.com',
+    role: 'customer',
+    phone: '+880 1812-456789',
+    address: 'House 42, Road 7, Nasirabad Housing Society',
+    passwordHash: hashPassword('customer123'),
+    createdAt: '2026-09-01T00:00:00Z',
+  },
+];
+
+const INITIAL_DELIVERIES: DeliveryRequest[] = [
+  {
+    id: 'del-1',
+    trackingNumber: 'TTS-DEL-7841',
+    customerId: 'usr-customer',
+    deliveryType: 'pickup_and_drop',
+    senderName: 'Anisur Rahman',
+    senderPhone: '+880 1812-456789',
+    pickupAddress: 'Agrabad Commercial Area, Finlay House, Floor 4',
+    receiverName: 'Farhana Sultana',
+    receiverPhone: '+880 1719-876543',
+    deliveryAddress: 'GEC Circle, Sanmar Ocean City, Shop 22',
+    packageType: 'Urgent Legal Contracts & Sample Prints',
+    packageWeight: '1.2 kg',
+    preferredPickupTime: 'Morning (10:00 AM - 12:00 PM)',
+    fare: 140,
+    status: 'in_transit',
+    assignedDriverId: 'drv-1',
+    assignedDriverName: 'Rahim Chowdhury',
+    assignedDriverPhone: '+880 1722-998877',
+    timeline: [
+      { status: 'requested', title: 'Pickup Request Received', description: 'Order logged and dispatched to nearby Tan Tech fleet.', timestamp: '2026-10-02T09:15:00Z', completed: true },
+      { status: 'accepted', title: 'Order Accepted by Operations', description: 'Assigned to driver Rahim Chowdhury (Car Axio).', timestamp: '2026-10-02T09:25:00Z', completed: true },
+      { status: 'pickup_assigned', title: 'Driver Assigned & En Route', description: 'Driver is arriving at Agrabad pickup point.', timestamp: '2026-10-02T09:40:00Z', completed: true },
+      { status: 'picked_up', title: 'Package Collected & Verified', description: 'Package collected from sender Anisur Rahman.', timestamp: '2026-10-02T10:10:00Z', completed: true },
+      { status: 'in_transit', title: 'In Transit to GEC Destination', description: 'Driver is on the way towards Sanmar Ocean City.', timestamp: '2026-10-02T10:20:00Z', completed: true },
+      { status: 'delivered', title: 'Delivered', description: 'Recipient signed and verified receipt.', timestamp: '', completed: false },
+    ],
+    createdAt: '2026-10-02T09:15:00Z',
+    updatedAt: '2026-10-02T10:20:00Z',
+  },
+  {
+    id: 'del-2',
+    trackingNumber: 'TTS-DEL-6520',
+    customerId: 'usr-customer',
+    deliveryType: 'product_delivery',
+    senderName: 'Tan Tech Digital Print Hub',
+    senderPhone: '+880 1711-234567',
+    pickupAddress: 'Shop 14, Tech Commercial Center',
+    receiverName: 'Anisur Rahman',
+    receiverPhone: '+880 1812-456789',
+    deliveryAddress: 'House 42, Road 7, Nasirabad Housing Society',
+    packageType: 'Visiting Cards Print Ream (1000 pcs)',
+    packageWeight: '2.5 kg',
+    preferredPickupTime: 'Immediate',
+    fare: 100,
+    status: 'delivered',
+    assignedDriverId: 'drv-2',
+    assignedDriverName: 'Karim Ullah',
+    assignedDriverPhone: '+880 1833-445566',
+    timeline: [
+      { status: 'requested', title: 'Delivery Order Created', description: 'Delivery request initiated from store.', timestamp: '2026-10-01T11:00:00Z', completed: true },
+      { status: 'accepted', title: 'Accepted', description: 'Dispatched to CNG courier.', timestamp: '2026-10-01T11:10:00Z', completed: true },
+      { status: 'picked_up', title: 'Parcel Picked Up', description: 'Collected from print shop.', timestamp: '2026-10-01T11:35:00Z', completed: true },
+      { status: 'delivered', title: 'Successfully Delivered', description: 'Delivered to customer doorstep at Nasirabad.', timestamp: '2026-10-01T12:15:00Z', completed: true },
+    ],
+    createdAt: '2026-10-01T11:00:00Z',
+    updatedAt: '2026-10-01T12:15:00Z',
+  }
+];
+
+const INITIAL_VEHICLE_BOOKINGS: VehicleBooking[] = [
+  {
+    id: 'veh-1',
+    bookingNumber: 'TTS-VEH-4412',
+    customerId: 'usr-customer',
+    customerName: 'Anisur Rahman',
+    customerPhone: '+880 1812-456789',
+    customerEmail: 'customer@tantech.com',
+    vehicleType: 'cng',
+    tripType: 'one_way',
+    pickupLocation: 'Nasirabad Housing Society, Gate 2',
+    dropLocation: 'Agrabad World Trade Center',
+    bookingDate: '2026-10-03',
+    bookingTime: '11:30 AM',
+    passengers: 2,
+    instructions: 'Please call 5 minutes before reaching Gate 2.',
+    estimatedFare: 220,
+    status: 'driver_on_the_way',
+    assignedDriverId: 'drv-2',
+    assignedDriverName: 'Karim Ullah',
+    assignedDriverPhone: '+880 1833-445566',
+    assignedVehiclePlate: 'CTG THA-11-9876',
+    createdAt: '2026-10-03T01:30:00Z',
+    updatedAt: '2026-10-03T02:00:00Z',
+  },
+  {
+    id: 'veh-2',
+    bookingNumber: 'TTS-VEH-3890',
+    customerId: 'usr-customer',
+    customerName: 'Anisur Rahman',
+    customerPhone: '+880 1812-456789',
+    customerEmail: 'customer@tantech.com',
+    vehicleType: 'car',
+    tripType: 'round_trip',
+    pickupLocation: 'GEC Circle, Chittagong',
+    dropLocation: 'Shah Amanat International Airport (CGP)',
+    bookingDate: '2026-10-05',
+    bookingTime: '07:00 AM',
+    passengers: 3,
+    instructions: 'Need spacious trunk for 2 large luggage bags. AC must be on.',
+    estimatedFare: 1450,
+    status: 'confirmed',
+    assignedDriverId: 'drv-1',
+    assignedDriverName: 'Rahim Chowdhury',
+    assignedDriverPhone: '+880 1722-998877',
+    assignedVehiclePlate: 'DHK METRO-GA-45-1234',
+    createdAt: '2026-10-02T14:20:00Z',
+    updatedAt: '2026-10-02T15:00:00Z',
+  }
+];
+
+const INITIAL_SERVICE_REQUESTS: ServiceRequest[] = [
+  {
+    id: 'srv-req-1',
+    requestNumber: 'TTS-SRV-102',
+    serviceId: 'srv-print',
+    serviceTitle: 'Digital Printing Service',
+    category: 'printing',
+    customerId: 'usr-customer',
+    customerName: 'Anisur Rahman',
+    customerEmail: 'customer@tantech.com',
+    customerPhone: '+880 1812-456789',
+    serviceType: 'Visiting Cards (Premium 350GSM Matte)',
+    quantity: 1000,
+    requirements: 'Company name: Rahman Global Logistics. Please use navy blue and cyan branding. Dual sided printing with QR code on back.',
+    deadline: '2026-10-06',
+    estimatedCost: 1500,
+    attachmentName: 'brand_logo_and_details.pdf',
+    status: 'in_progress',
+    adminNotes: 'Sample proof approved by client via WhatsApp. Sent to production press.',
+    createdAt: '2026-10-01T15:30:00Z',
+    updatedAt: '2026-10-02T11:00:00Z',
+  },
+  {
+    id: 'srv-req-2',
+    requestNumber: 'TTS-SRV-105',
+    serviceId: 'srv-design',
+    serviceTitle: 'Graphic Design Studio',
+    category: 'graphic_design',
+    customerId: 'usr-customer',
+    customerName: 'Anisur Rahman',
+    customerEmail: 'customer@tantech.com',
+    customerPhone: '+880 1812-456789',
+    serviceType: 'Logo Design & Social Media Cover Bundle',
+    quantity: 1,
+    requirements: 'Modern minimalist logo with lettermark "TR". Tech startup feel, clean geometry, transparent PNG & vector SVG required.',
+    deadline: '2026-10-07',
+    estimatedCost: 2500,
+    status: 'reviewed',
+    adminNotes: 'Assigned to Senior Designer Farhan.',
+    createdAt: '2026-10-02T16:00:00Z',
+    updatedAt: '2026-10-03T01:00:00Z',
+  }
+];
+
+const INITIAL_ORDERS: Order[] = [
+  {
+    id: 'ord-1',
+    orderNumber: 'TTS-ORD-5541',
+    customerId: 'usr-customer',
+    customerName: 'Anisur Rahman',
+    customerEmail: 'customer@tantech.com',
+    customerPhone: '+880 1812-456789',
+    items: [
+      {
+        productId: 'prod-1',
+        productName: 'Wireless Silent Keyboard & Ergonomic Mouse Combo',
+        price: 1850,
+        quantity: 1,
+        image: 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80',
+        vendorId: 'ven-1',
+      },
+      {
+        productId: 'prod-2',
+        productName: 'Double A 80GSM A4 Premium Digital Printing Paper (500 Sheets)',
+        price: 520,
+        quantity: 2,
+        image: 'https://images.unsplash.com/photo-1586075010923-2dd4570fb338?auto=format&fit=crop&w=800&q=80',
+        vendorId: 'ven-1',
+      }
+    ],
+    subtotal: 2890,
+    deliveryFee: 60,
+    discount: 100,
+    totalAmount: 2850,
+    deliveryAddress: {
+      address: 'House 42, Road 7, Nasirabad Housing Society',
+      city: 'Chittagong',
+      zone: 'Nasirabad',
+      instructions: 'Deliver to security reception on ground floor.',
+    },
+    paymentMethod: 'bkash',
+    paymentStatus: 'paid',
+    orderStatus: 'processing',
+    trackingNumber: 'TTS-DEL-7841',
+    createdAt: '2026-10-02T08:30:00Z',
+    updatedAt: '2026-10-02T09:00:00Z',
+  }
+];
+
+const INITIAL_ADS: Advertisement[] = [
+  {
+    id: 'ad-1',
+    title: 'Festive Digital Print Bonanza',
+    subtitle: 'Flat 20% off on all visiting cards, posters, and vinyl banners with free city delivery!',
+    badge: 'Limited Time Deal',
+    bannerUrl: 'https://images.unsplash.com/photo-1563986768609-322da13575f3?auto=format&fit=crop&w=1200&q=80',
+    targetUrl: '/services',
+    ctaText: 'Claim Print Offer',
+    placement: 'hero',
+    startDate: '2026-10-01',
+    endDate: '2026-10-31',
+    isActive: true,
+    clicks: 142,
+  },
+  {
+    id: 'ad-2',
+    title: 'Super-Fast City Parcel Delivery',
+    subtitle: 'From document pickup to bulk logistics — reliable door-to-door delivery within 2 hours.',
+    badge: 'Tan Tech Express',
+    bannerUrl: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=1200&q=80',
+    targetUrl: '/delivery',
+    ctaText: 'Send Package Now',
+    placement: 'marketplace',
+    startDate: '2026-10-01',
+    endDate: '2026-11-15',
+    isActive: true,
+    clicks: 89,
+  }
+];
+
+const INITIAL_NEWS: NewsItem[] = [
+  {
+    id: 'news-1',
+    title: 'TAN TECH SUPPORT Launches Multi-Service Digital & Mobility Platform',
+    slug: 'tan-tech-support-platform-launch',
+    excerpt: 'Combining cutting-edge digital printing, creative design, certified computer training, online marketplace, and on-demand vehicle booking under one unified digital roof.',
+    content: 'We are thrilled to officially unveil the all-in-one TAN TECH SUPPORT platform. Designed to empower individuals, educational institutions, and businesses across the country, our integrated hub eliminates fragmentation by uniting printing, computer literacy, delivery logistics, and vehicle mobility in one seamless, high-speed interface.',
+    category: 'Announcement',
+    youtubeUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1519389950473-47ba0277781c?auto=format&fit=crop&w=800&q=80',
+    publishedAt: '2026-10-01T12:00:00Z',
+    author: 'Tanvir Hossain, Founder',
+  },
+  {
+    id: 'news-2',
+    title: 'Top 7 MS Excel & Office Shortcuts Every Professional Needs in 2026',
+    slug: 'top-excel-shortcuts-2026',
+    excerpt: 'Boost your daily workplace productivity by 300% with these fundamental Excel formulas, pivot table tricks, and automation shortcuts taught in our Computer Training courses.',
+    content: 'Whether you are managing invoices, running financial reconciliations, or tracking delivery inventory, mastering modern Excel is an undeniable career accelerator. Here is a curated walkthrough by our senior lab instructor.',
+    category: 'Tutorial',
+    youtubeUrl: 'https://www.youtube.com/watch?v=k1BneeJTDcU',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=800&q=80',
+    publishedAt: '2026-09-28T09:00:00Z',
+    author: 'Computer Training Faculty',
+  },
+  {
+    id: 'news-3',
+    title: 'Why Premium Card Stock Matters: First Impressions for Modern Entrepreneurs',
+    slug: 'why-premium-card-stock-matters',
+    excerpt: 'Your visiting card is your brand handshake. Discover why 350GSM card stock with velvet matte lamination creates unforgettable client connections.',
+    content: 'In a digital age, tactile brand experiences stand out more than ever. When handing a prospective partner your visiting card, texture, weight, and print sharpness communicate reliability before a word is spoken.',
+    category: 'Tech News',
+    youtubeUrl: '',
+    thumbnailUrl: 'https://images.unsplash.com/photo-1589829085413-56de8ae18c73?auto=format&fit=crop&w=800&q=80',
+    publishedAt: '2026-09-22T14:30:00Z',
+    author: 'Print Studio Team',
+  }
+];
+
+const INITIAL_SETTINGS: SiteSettings = {
+  businessName: 'TAN TECH SUPPORT',
+  tagline: 'Your Trusted Digital Partner',
+  contactPhone: '+880 1711-234567',
+  contactEmail: 'support@tantech.com',
+  address: 'Level 2 & 4, Tan Tech Complex, GEC Circle, Chittagong, Bangladesh',
+  operatingHours: 'Saturday - Thursday: 8:30 AM - 10:00 PM (Friday: 2:00 PM - 9:00 PM)',
+  announcementText: '🎉 Welcome to TAN TECH SUPPORT! Fast Delivery across city • Book Cars & CNGs instantly • Certified Computer Training enrolling now!',
+  announcementActive: true,
+  facebookUrl: 'https://facebook.com/tantechsupport',
+  youtubeUrl: 'https://youtube.com/@tantechsupport',
+  whatsappNumber: '+8801711234567',
+  deliveryBaseRate: 60,
+  cngRatePerKm: 25,
+  carRatePerKm: 55,
+  vanRatePerKm: 90,
+};
+
+const INITIAL_NOTIFICATIONS: NotificationItem[] = [
+  {
+    id: 'notif-1',
+    userId: 'usr-customer',
+    title: 'Order Status Update',
+    message: 'Your Order #TTS-ORD-5541 is now being processed for delivery.',
+    type: 'order',
+    link: '/account',
+    read: false,
+    createdAt: '2026-10-02T09:00:00Z',
+  },
+  {
+    id: 'notif-2',
+    userId: 'usr-customer',
+    title: 'Driver On The Way',
+    message: 'CNG driver Karim Ullah is en route to pick you up for Booking #TTS-VEH-4412.',
+    type: 'booking',
+    link: '/vehicle-booking',
+    read: false,
+    createdAt: '2026-10-03T02:00:00Z',
+  }
+];
+
+function initializeDatabase(): DatabaseSchema {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
+  if (!fs.existsSync(DB_FILE)) {
+    const initialData: DatabaseSchema = {
+      users: INITIAL_USERS,
+      vendors: INITIAL_VENDORS,
+      drivers: INITIAL_DRIVERS,
+      products: INITIAL_PRODUCTS,
+      services: INITIAL_SERVICES,
+      serviceRequests: INITIAL_SERVICE_REQUESTS,
+      orders: INITIAL_ORDERS,
+      deliveries: INITIAL_DELIVERIES,
+      vehicleBookings: INITIAL_VEHICLE_BOOKINGS,
+      advertisements: INITIAL_ADS,
+      news: INITIAL_NEWS,
+      settings: INITIAL_SETTINGS,
+      notifications: INITIAL_NOTIFICATIONS,
+    };
+    fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2), 'utf-8');
+    return initialData;
+  }
+
+  try {
+    const content = fs.readFileSync(DB_FILE, 'utf-8');
+    return JSON.parse(content) as DatabaseSchema;
+  } catch (err) {
+    console.error('Failed reading DB file, recreating default:', err);
+    const initialData: DatabaseSchema = {
+      users: INITIAL_USERS,
+      vendors: INITIAL_VENDORS,
+      drivers: INITIAL_DRIVERS,
+      products: INITIAL_PRODUCTS,
+      services: INITIAL_SERVICES,
+      serviceRequests: INITIAL_SERVICE_REQUESTS,
+      orders: INITIAL_ORDERS,
+      deliveries: INITIAL_DELIVERIES,
+      vehicleBookings: INITIAL_VEHICLE_BOOKINGS,
+      advertisements: INITIAL_ADS,
+      news: INITIAL_NEWS,
+      settings: INITIAL_SETTINGS,
+      notifications: INITIAL_NOTIFICATIONS,
+    };
+    fs.writeFileSync(DB_FILE, JSON.stringify(initialData, null, 2), 'utf-8');
+    return initialData;
+  }
+}
+
+// In-memory reference synced with atomic disk file
+let dbCache: DatabaseSchema | null = null;
+
+export function getDb(): DatabaseSchema {
+  if (!dbCache) {
+    dbCache = initializeDatabase();
+  }
+  return dbCache;
+}
+
+export function saveDb(updatedData: DatabaseSchema): void {
+  dbCache = updatedData;
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+  const tempFile = `${DB_FILE}.tmp.${Date.now()}`;
+  fs.writeFileSync(tempFile, JSON.stringify(updatedData, null, 2), 'utf-8');
+  fs.renameSync(tempFile, DB_FILE);
+}
+
+// Helper query methods
+export function sanitizeUser(user: UserRecord): User {
+  const { passwordHash: _, ...safeUser } = user;
+  return safeUser;
+}
